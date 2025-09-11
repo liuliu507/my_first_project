@@ -1,236 +1,200 @@
-from scipy import io
+import random
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+import scipy.io as sio
+from numpy import resize
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
-
-patchsize1 = 11
-patchsize2 = 11
-batchsize = 64
-EPOCH = 200
-LR = 0.001
-pad_width = np.floor(patchsize1 / 2)
-pad_width = np.int32(pad_width)
-pad_width2 = np.floor(patchsize2 / 2)
-pad_width2 = np.int32(pad_width2)
+from sklearn.metrics import confusion_matrix, accuracy_score, classification_report, cohen_kappa_score
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from operator import truediv
+import time
+import record
 
 
+def loadData():
 
-def data_load(name="Trento", split_percent=0.2):
+    data = sio.loadmat(
+        r'./Data/Muufl_hsi.mat')[
+        'hsi']
+    labels = sio.loadmat(
+        r'.\Data\Muufl_gt.mat')[
+        'Muufl_gt']
+    lidar_data = sio.loadmat(
+        r'.\Data\Muufl_Lidar.mat')[
+        'lidar']
 
-    if name == "Trento":
-        DataPath1 = './dataset/Trento/HSI.mat'
-        DataPath2 = './dataset/Trento/LiDAR.mat'
-        TRPath = './dataset/Trento/TRLabel.mat'
-        TSPath = './dataset/Trento/TSLabel.mat'
+    # data = sio.loadmat(
+    #     r'./Data/Houston.mat')[
+    #     'img']
+    # labels = sio.loadmat(
+    #     r'./Data/Houston_gt.mat')[
+    #     'Houston_gt']
+    # lidar_data = sio.loadmat(
+    #     r'./Data/Houston_LiDAR.mat')[
+    #     'img']
 
-        TrLabel = io.loadmat(TRPath)
-        TsLabel = io.loadmat(TSPath)
-        TrLabel = TrLabel['TRLabel']
-        TsLabel = TsLabel['TSLabel']
+    # data = sio.loadmat(
+    #     r'./Data/Trento_hsi.mat')[
+    #     'HSI']
+    # labels = sio.loadmat(
+    #     r'./Data/Trento_allgrd.mat')[
+    #     'mask_test']
+    # lidar_data = sio.loadmat(
+    #     r'./Data/Trento_LiDAR.mat')[
+    #     'LiDAR']
 
-        Data = io.loadmat(DataPath1)
-        Data = Data['HSI']
-        Data = Data.astype(np.float32)
+    # data = sio.loadmat(
+    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_hsi.mat')[
+    #     'augsburg_hsi']
+    # labels = sio.loadmat(
+    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_gt.mat')[
+    #     'augsburg_gt']
+    # lidar_data = sio.loadmat(
+    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_sar.mat')[
+    #     'augsburg_sar']
 
-        Data2 = io.loadmat(DataPath2)
-        Data2 = Data2['LiDAR']
-        Data2 = Data2.astype(np.float32)
-
-    elif name == "Augsburg":
-        DataPath1 = './dataset/Augsburg/data_DSM.mat'
-        DataPath2 = './dataset/Augsburg/data_HS_LR.mat'
-        TRPath = './dataset/Augsburg/TrainImage.mat'
-        TSPath = './dataset/Augsburg/TestImage.mat'
-        TrLabel = io.loadmat(TRPath)
-        TsLabel = io.loadmat(TSPath)
-        TrLabel = TrLabel['TrainImage']
-        TsLabel = TsLabel['TestImage']
-
-        Data2 = io.loadmat(DataPath1)
-        Data2 = Data2['data_DSM']
-        Data2 = Data2.astype(np.float32)
-
-        Data = io.loadmat(DataPath2)
-        Data = Data['data_HS_LR']
-        Data = Data.astype(np.float32)
-
-    elif name == "Houston":
-        DataPath1 = './dataset/Houston2013/Houston_HS.mat'
-        DataPath2 = './dataset/Houston2013/Houston_LiDAR.mat'
-        TRPath = './dataset/Houston2013/Houston_train.mat'
-        TSPath = './dataset/Houston2013/Houston_test.mat'
-        TrLabel = io.loadmat(TRPath)
-        TsLabel = io.loadmat(TSPath)
-        TrLabel = TrLabel['TR']
-        TsLabel = TsLabel['TE']
-
-        Data = io.loadmat(DataPath1)
-        Data = Data['input']
-        Data = Data.astype(np.float32)
-
-        Data2 = io.loadmat(DataPath2)
-        Data2 = Data2['input']
-        Data2 = Data2.astype(np.float32)
-
-    spData, a, spTrLabel, b = train_test_split(Data, TrLabel, test_size=(1-split_percent), random_state=3, shuffle=False)
-    spData2, a, spTrLabel2, b = train_test_split(Data2, TrLabel, test_size=(1-split_percent), random_state=3, shuffle=False)
-
-    return Data,Data2,TrLabel,TsLabel
-
-
-def nor_pca(Data,Data2,ispca=True):
-    [m, n, l] = Data.shape
-    for i in range(l):
-        minimal = Data[:, :, i].min()
-        maximal = Data[:, :, i].max()
-        Data[:, :, i] = (Data[:, :, i] - minimal) / (maximal - minimal)
-
-    minimal = Data2.min()
-    maximal = Data2.max()
-    Data2 = (Data2 - minimal) / (maximal - minimal)
-
-    if ispca is True:
-        NC = 20
-        PC = np.reshape(Data, (m * n, l))
-        pca = PCA(n_components=NC, copy=True, whiten=False)
-        PC = pca.fit_transform(PC)
-        PC = np.reshape(PC, (m, n, NC))
+    # 检查LiDAR数据的维度
+    if len(lidar_data.shape) == 3 and lidar_data.shape[2] >= 2:
+        print(f"原始LiDAR数据形状: {lidar_data.shape} - 将对两个通道取平均值")
+        # 对两个通道取平均值，降维为单通道
+        lidar_data = np.mean(lidar_data, axis=2)
+    elif len(lidar_data.shape) == 2:
+        print(f"原始LiDAR数据形状: {lidar_data.shape} - 已经是单通道")
     else:
-        NC = l
-        PC = Data
+        raise ValueError(f"意外的LiDAR数据形状: {lidar_data.shape}")
 
-    return PC,Data2,NC
+    # 打印处理后的形状
+    print(f"处理后LiDAR数据形状: {lidar_data.shape}")
 
-
-def border_inter(PC,Data2,NC):
-    temp = PC[:, :, 0]
-    pad_width = np.floor(patchsize1 / 2)
-    pad_width = np.int32(pad_width)
-    temp2 = np.pad(temp, pad_width, 'symmetric')
-    [m2, n2] = temp2.shape
-    x = np.empty((m2, n2, NC), dtype='float32')
-
-    for i in range(NC):
-        temp = PC[:, :, i]
-        pad_width = np.floor(patchsize1 / 2)
-        pad_width = np.int32(pad_width)
-        temp2 = np.pad(temp, pad_width, 'symmetric')
-        x[:, :, i] = temp2
-
-    x2 = Data2
-    pad_width2 = np.floor(patchsize2 / 2)
-    pad_width2 = np.int32(pad_width2)
-    temp2 = np.pad(x2, pad_width2, 'symmetric')
-    x2 = temp2
-    return x, x2
+    return data, labels, lidar_data
 
 
-def con_data(x,x2,TrLabel,TsLabel,NC):
-    [ind1, ind2] = np.where(TrLabel != 0)
-    TrainNum = len(ind1)
-    TrainPatch = np.empty((TrainNum, NC, patchsize1, patchsize1), dtype='float32')
-    TrainLabel = np.empty(TrainNum)
-    ind3 = ind1 + pad_width
-    ind4 = ind2 + pad_width
-    for i in range(len(ind1)):
-        patch = x[(ind3[i] - pad_width):(ind3[i] + pad_width + 1), (ind4[i] - pad_width):(ind4[i] + pad_width + 1), :]
-        patch = np.reshape(patch, (patchsize1 * patchsize1, NC))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (NC, patchsize1, patchsize1))
-        TrainPatch[i, :, :, :] = patch
-        patchlabel = TrLabel[ind1[i], ind2[i]]
-        TrainLabel[i] = patchlabel
+# 对高光谱数据 X 应用 PCA 变换
+def applyPCA(X, numComponents):
+    newX = np.reshape(X, (-1, X.shape[2]))
+    pca = PCA(n_components=numComponents, whiten=True)
+    newX = pca.fit_transform(newX)
+    newX = np.reshape(newX, (X.shape[0], X.shape[1], numComponents))
+    return newX
 
-    [ind1, ind2] = np.where(TsLabel != 0)
-    TestNum = len(ind1)
-    TestPatch = np.empty((TestNum, NC, patchsize1, patchsize1), dtype='float32')
-    TestLabel = np.empty(TestNum)
-    ind3 = ind1 + pad_width
-    ind4 = ind2 + pad_width
-    for i in range(len(ind1)):
-        patch = x[(ind3[i] - pad_width):(ind3[i] + pad_width + 1), (ind4[i] - pad_width):(ind4[i] + pad_width + 1), :]
-        patch = np.reshape(patch, (patchsize1 * patchsize1, NC))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (NC, patchsize1, patchsize1))
-        TestPatch[i, :, :, :] = patch
-        patchlabel = TsLabel[ind1[i], ind2[i]]
-        TestLabel[i] = patchlabel
 
-    [ind1, ind2] = np.where(TrLabel != 0)
-    TrainNum = len(ind1)
-    TrainPatch2 = np.empty((TrainNum, 1, patchsize2, patchsize2), dtype='float32')
-    TrainLabel2 = np.empty(TrainNum)
-    ind3 = ind1 + pad_width2
-    ind4 = ind2 + pad_width2
-    for i in range(len(ind1)):
-        patch = x2[(ind3[i] - pad_width2):(ind3[i] + pad_width2 + 1), (ind4[i] - pad_width2):(ind4[i] + pad_width2 + 1)]
-        patch = np.reshape(patch, (patchsize2 * patchsize2, 1))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (1, patchsize2, patchsize2))
-        TrainPatch2[i, :, :, :] = patch
-        patchlabel2 = TrLabel[ind1[i], ind2[i]]
-        TrainLabel2[i] = patchlabel2
+# 对单个像素周围提取 patch 时，边缘像素就无法取了，因此，给这部分像素进行 padding 操作
+def padWithZeros(X, margin=2):
+    newX = np.zeros((X.shape[0] + 2 * margin, X.shape[1] + 2 * margin, X.shape[2]))
+    x_offset = margin
+    y_offset = margin
+    newX[x_offset:X.shape[0] + x_offset, y_offset:X.shape[1] + y_offset, :] = X
+    return newX
 
-    [ind1, ind2] = np.where(TsLabel != 0)
-    TestNum = len(ind1)
-    TestPatch2 = np.empty((TestNum, 1, patchsize2, patchsize2), dtype='float32')
-    TestLabel2 = np.empty(TestNum)
-    ind3 = ind1 + pad_width2
-    ind4 = ind2 + pad_width2
-    for i in range(len(ind1)):
-        patch = x2[(ind3[i] - pad_width2):(ind3[i] + pad_width2 + 1), (ind4[i] - pad_width2):(ind4[i] + pad_width2 + 1)]
-        patch = np.reshape(patch, (patchsize2 * patchsize2, 1))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (1, patchsize2, patchsize2))
-        TestPatch2[i, :, :, :] = patch
-        patchlabel2 = TsLabel[ind1[i], ind2[i]]
-        TestLabel2[i] = patchlabel2
 
-    return TrainPatch,TestPatch,TrainPatch2,TestPatch2,TrainLabel,TestLabel,TrainLabel2,TestLabel2
+# 在每个像素周围提取 patch ，然后创建成符合 keras 处理的格式
+def createImageCubes(hsi_data, lidar_data, y, windowSize=5, removeZeroLabels=True):
+    # 给 X 做 padding
+    margin = int((windowSize - 1) / 2)
+    hsi_padded = padWithZeros(hsi_data, margin=margin)
+    lidar_padded = padWithZeros(np.expand_dims(lidar_data, axis=-1), margin=margin)
+    # split patches
+    patchesData_hsi = np.zeros((hsi_data.shape[0] * hsi_data.shape[1], windowSize, windowSize, hsi_data.shape[2]))
+    patchesData_lidar = np.zeros((lidar_data.shape[0] * lidar_data.shape[1], windowSize, windowSize, 1))
+    patchesLabels = np.zeros((hsi_data.shape[0] * hsi_data.shape[1]))
 
-def con_data1(x,x2,AllLabel,NC):
+    patchIndex = 0
+    for r in range(margin, hsi_padded.shape[0] - margin):
+        for c in range(margin, hsi_padded.shape[1] - margin):
+            patchesData_hsi[patchIndex] = hsi_padded[r - margin:r + margin + 1, c - margin:c + margin + 1, :]
+            patchesData_lidar[patchIndex] = lidar_padded[r - margin:r + margin + 1, c - margin:c + margin + 1, :]
+            patchesLabels[patchIndex] = y[r - margin, c - margin]
+            patchIndex += 1
+    if removeZeroLabels:
+        mask = patchesLabels > 0
+        return patchesData_hsi[mask], patchesData_lidar[mask], patchesLabels[mask] - 1
 
-    [ind1, ind2] = np.where(AllLabel != 0)
-    TestNum = len(ind1)
-    Allpatch = np.empty((TestNum, NC, patchsize1, patchsize1), dtype='float32')
-    TestLabel = np.empty(TestNum)
-    ind3 = ind1 + pad_width
-    ind4 = ind2 + pad_width
-    for i in range(len(ind1)):
-        patch = x[(ind3[i] - pad_width):(ind3[i] + pad_width + 1), (ind4[i] - pad_width):(ind4[i] + pad_width + 1), :]
-        patch = np.reshape(patch, (patchsize1 * patchsize1, NC))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (NC, patchsize1, patchsize1))
-        Allpatch[i, :, :, :] = patch
-        patchlabel = AllLabel[ind1[i], ind2[i]]
-        TestLabel[i] = patchlabel
+    return patchesData_hsi, patchesData_lidar, patchesLabels
 
-   
-    [ind1, ind2] = np.where(AllLabel != 0)
-    TestNum = len(ind1)
-    Allpatch2 = np.empty((TestNum, 1, patchsize2, patchsize2), dtype='float32')
-    TestLabel2 = np.empty(TestNum)
-    ind3 = ind1 + pad_width2
-    ind4 = ind2 + pad_width2
-    for i in range(len(ind1)):
-        patch = x2[(ind3[i] - pad_width2):(ind3[i] + pad_width2 + 1), (ind4[i] - pad_width2):(ind4[i] + pad_width2 + 1)]
-        patch = np.reshape(patch, (patchsize2 * patchsize2, 1))
-        patch = np.transpose(patch)
-        patch = np.reshape(patch, (1, patchsize2, patchsize2))
-        Allpatch2[i, :, :, :] = patch
-        patchlabel2 = AllLabel[ind1[i], ind2[i]]
-        TestLabel2[i] = patchlabel2
+# 封装为可迭代的Dataset对象
+""" Training dataset"""
+class TrainDS(torch.utils.data.Dataset):
+    def __init__(self, Xtrain_hsi, Xtrain_lidar, ytrain):
+        self.len = ytrain.shape[0]
+        self.x_hsi = torch.FloatTensor(Xtrain_hsi).squeeze(1)  # HSI保持[N,30,13,13]
+        self.x_lidar = torch.FloatTensor(Xtrain_lidar)  # 不要squeeze，保持[N,1,13,13]
+        self.y = torch.LongTensor(ytrain)
 
-    return Allpatch,Allpatch2
+    def __getitem__(self, index):
+        return self.x_hsi[index], self.x_lidar[index], self.y[index]
 
-def getIndex(TestLabel, temp):
-    index = np.empty(shape=(2,temp), dtype=int)
-    k = 0
-    for i in range(len(TestLabel)):
-        for j in range(len(TestLabel[0])):
-            if TestLabel[i][j] != 0:
-                index[0][k] = i+1
-                index[1][k] = j+1
-                k += 1
+    def __len__(self):
+        return self.len
 
-    return index
+
+""" Testing dataset"""
+class TestDS(torch.utils.data.Dataset):
+
+    def __init__(self, Xtest_hsi, Xtest_lidar, ytest):
+        self.len = ytest.shape[0]
+        self.x_hsi = torch.FloatTensor(Xtest_hsi)
+        self.x_lidar = torch.FloatTensor(Xtest_lidar)
+        self.y_data = torch.LongTensor(ytest)
+
+    def __getitem__(self, index):
+        # 根据索引返回数据和对应的标签
+        return self.x_hsi[index], self.x_lidar[index], self.y_data[index]
+
+    def __len__(self):
+        # 返回文件数据的数目
+        return self.len
+
+
+
+def AA_andEachClassAccuracy(confusion_matrix):
+    list_diag = np.diag(confusion_matrix)
+    list_raw_sum = np.sum(confusion_matrix, axis=1)
+    each_acc = np.nan_to_num(truediv(list_diag, list_raw_sum))
+    average_acc = np.mean(each_acc)
+    return each_acc, average_acc
+
+
+def acc_reports(y_test, y_pred_test):
+    # Houston2013
+    # all_names = ['Healthy Grass', 'Stressed Grass', 'Synthetic Grass', 'Tree',
+    #              'Soil', 'Water', 'Residential', 'Commercial', 'Road', 'Highway',
+    #              'Railway', 'Parking Lot1', 'Parking Lot2', 'Tennis Court',
+    #              'Running Track']
+
+    # Trento
+    # all_names = ['Apple Trees', 'Buildings', 'Ground',
+    #              'Woods', 'Vineyard', 'Roads', ]  # Trento 6
+
+    # Muufl
+    all_names = ['Trees', 'Mostly grass', 'Mixed ground surface',
+                 'Dirt and sand', 'Road','Water', 'Building Shadow',
+                 'Building','Sidewalk', 'Yellow curb','Cloth panels']  # Muufl 11
+
+    # Augsburg
+    # all_names = ['Forest', 'Residential Area', 'Industrial Area',
+    #     'Low Plants', 'Soil', 'Allotment',
+    #     'Commercial Area', 'Water', 'Railway',
+    #     'Harbor', 'Pasture', 'Roads','Urban Green'] # Augsburg 13
+
+    unique_labels = sorted(np.unique(y_test))
+    used_names = [all_names[i] for i in unique_labels]
+
+    classification = classification_report(
+        y_test,
+        y_pred_test,
+        labels=unique_labels,
+        digits=4,
+        target_names=used_names
+    )
+
+    confusion = confusion_matrix(y_test, y_pred_test, labels=unique_labels)
+    each_acc, aa = AA_andEachClassAccuracy(confusion)
+    oa = accuracy_score(y_test, y_pred_test)
+    kappa = cohen_kappa_score(y_test, y_pred_test)
+
+    return classification, oa * 100, confusion, each_acc * 100, aa * 100, kappa * 100, unique_labels
+
