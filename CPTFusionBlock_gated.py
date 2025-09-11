@@ -1,51 +1,73 @@
 import torch
 import torch.nn as nn
-from torchsummary import summary
 import torch.nn.functional as F
-import math
 
 
+# ---------- 门控融合模块 ----------
+class GatedFusion(nn.Module):
+    """
+    输入: hsi, lidar  [B, C, H, W]
+    输出: fused      [B, C, H, W]
+    原理：用 sigmoid 学一个 0~1 的权重 g，让网络自己决定要不要用 LiDAR
+    """
+    def __init__(self, embed_dim):
+        super().__init__()
+        self.gate = nn.Sequential(
+            nn.Conv2d(embed_dim * 2, embed_dim, 1),  # 1×1 卷积比全连接更省
+            nn.Sigmoid()
+        )
+
+    def forward(self, hsi, lidar):
+        combined = torch.cat([hsi, lidar], dim=1)   # [B, 2C, H, W]
+        g = self.gate(combined)                     # [B, C, H, W]  0~1
+        return hsi * (1 - g) + lidar * g            # 软融合
+
+
+# ---------- 带门控的 CPT 融合块 ----------
 class CPTFusionBlock(nn.Module):
     def __init__(self, embed_dim, num_classes, num_heads=4, use_memory=False):
         super().__init__()
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
 
-        # Cross-attention: HSI (Q) ← LiDAR (K/V)
+        # 交叉注意力保持不变
         self.cross_attn = nn.MultiheadAttention(embed_dim, num_heads, batch_first=True)
 
-        # Category Prototype Learning（简化版）
+        # 类别原型保持不变（你可以后续再动）
         self.prototype = nn.Parameter(torch.randn(num_classes, embed_dim))
         self.use_memory = use_memory
         if use_memory:
             self.memory = nn.Parameter(torch.randn(num_classes, embed_dim))
 
-        # FFN
+        # FFN 保持不变
         self.ffn = nn.Sequential(
             nn.Linear(embed_dim, embed_dim * 4),
             nn.GELU(),
             nn.Linear(embed_dim * 4, embed_dim)
         )
 
+        # ✅ 新增：门控融合
+        self.gated = GatedFusion(embed_dim)
+
+
     def forward(self, hsi_feat, lidar_feat, label=None):
         B, C, H, W = hsi_feat.shape
-        hsi = hsi_feat.flatten(2).transpose(1, 2)  # B, HW, C
-        lidar = lidar_feat.flatten(2).transpose(1, 2)
 
-        # Norm
+        # 1. 先门控融合一把（空间域）
+        fused_map = self.gated(hsi_feat, lidar_feat)        # [B, C, H, W]
+
+        # 2. 拉直做交叉注意力（通道域）
+        hsi = fused_map.flatten(2).transpose(1, 2)          # [B, HW, C]
+        lidar = lidar_feat.flatten(2).transpose(1, 2)       # LiDAR 仍做 K/V
         hsi = self.norm1(hsi)
         lidar = self.norm2(lidar)
-
-        # Cross-attention
         fused, _ = self.cross_attn(hsi, lidar, lidar)
-
-        # Add & Norm
         out = fused + hsi
 
-        # FFN
+        # 3. FFN
         out = out + self.ffn(out)
 
-        # Reshape back
+        # 4. 还原空间
         out = out.transpose(1, 2).view(B, C, H, W)
         return out
 
@@ -119,7 +141,7 @@ class pyCNN(nn.Module):
                           F.normalize(label_feat.detach(), dim=1))
         return loss * 0.1
 
-    def forward(self, x1, x2,return_mask=False):
+    def forward(self, x1, x2,labels,return_mask=False):
 
         if x1.dim() != 4 or x1.size(1) != 30:
             print(f"Warning: HSI shape mismatch! Got {x1.shape}, expected [batch,30,h,w]")
@@ -139,6 +161,8 @@ class pyCNN(nn.Module):
         # ✅ CPT 融合（保持空间维度）
         fused = self.cpt_fusion(x1, x2)  # [B, FM*4, H, W]
 
+        feat_global = F.adaptive_avg_pool2d(fused, (1, 1)).squeeze(-1).squeeze(-1)  # [B, FM*4]
+
         # ✅ 展平并送入分类器
         x = fused.view(fused.size(0), -1)
         out3 = self.out3(x)
@@ -149,4 +173,8 @@ class pyCNN(nn.Module):
         out1 = self.out1(x1_flat)
         out2 = self.out2(x2_flat)
 
-        return out1, out2, out3
+        proto_loss = 0
+        if labels is not None:
+            proto_loss = self.prototype_loss(feat_global, labels)
+
+        return out1, out2, out3, proto_loss

@@ -11,7 +11,8 @@ import torch.optim as optim
 import torch.utils.data as dataf
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
 
-from pymodel import pyCNN
+# from pymodel import pyCNN
+from CPTFusionBlock_gated import pyCNN
 from data_prepare_20nums import loadData, applyPCA, padWithZeros, createImageCubes, TrainDS, TestDS,acc_reports
 import record
 
@@ -27,9 +28,9 @@ os.environ['PYTHONHASHSEED'] = str(seed)
 BATCH_SIZE_TRAIN = 64
 EPOCH = 200
 LR = 0.001
-CLASSES_NUM = 15  # Houston数据集
+# CLASSES_NUM = 15  # Houston数据集
 # CLASSES_NUM = 11  # Muufl数据集
-# CLASSES_NUM = 6  # Trento数据集
+CLASSES_NUM = 6  # Trento数据集
 
 
 def create_data_loader():
@@ -160,19 +161,19 @@ def train(train_loader, epochs):
             hsi, lidar = hsi.to(device), lidar.to(device)
             target = target.to(device)
 
-            out1, out2, out3 = cnn(hsi, lidar)
+            out1, out2, out3, proto_loss = cnn(hsi, lidar, target)
             loss1 = criterion(out1, target)
             loss2 = criterion(out2, target)
             loss3 = criterion(out3, target)
-            loss = loss1 + loss2 + loss3
+            loss = loss1 + loss2 + loss3 + proto_loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
             total_loss += loss.item()
 
-        print('[Epoch: %d] [loss avg: %.4f] [current loss: %.4f]' %
-              (epoch + 1, total_loss / (epoch + 1), loss.item()))
+        print('[Epoch: %d] [loss avg: %.4f] [current loss: %.4f] [proto loss: %.4f]' %
+              (epoch + 1, total_loss / (epoch + 1), loss.item(), proto_loss.item()))
         scheduler.step()
     print('Finished Training')
     return cnn, device
@@ -187,7 +188,7 @@ def test(device, net, test_loader):
     for hsi, lidar, labels in test_loader:
         hsi = hsi.to(device)
         lidar = lidar.to(device)
-        outputs = net(hsi, lidar)
+        outputs = net(hsi, lidar,None)
         outputs = 1 * outputs[2] + 0.01 * outputs[1] + 0.01 * outputs[0]
         preds = torch.max(outputs, 1)[1].cpu().numpy()
 
@@ -246,24 +247,7 @@ if __name__ == '__main__':
         ELEMENT_ACC[index_iter, :] = each_acc_full
 
         record_dir = r"C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\MS2CA\MS2CANet-main\record"
-        output_file = os.path.join(record_dir, "MS2CANet_HC53 Houston20个做训练集+add融合+去掉多尺度卷积.txt")
-
-
-        # 生成分类图，将预测结果映射回原始图像空间，结果可视化
-        # # 1. 定义期望的图像尺寸
-        # # ORIGINAL_SHAPE = (125, 120)  # 125行 × 120列 = 15,000像素  Houston
-        # ORIGINAL_SHAPE = (159, 190)  # 159行 × 190列 = 30210像素  Trento
-        # # ORIGINAL_SHAPE = (182, 295)  # 182行 × 295列 = 53690像素  Muufl
-        # # ORIGINAL_SHAPE = (290, 270)  # 290行 × 270列 = 78300像素  Augsburg
-        #
-        # EXPECTED_SIZE = ORIGINAL_SHAPE[0] * ORIGINAL_SHAPE[1]
-        # if len(y_all) != EXPECTED_SIZE:
-        #     print(f"数据长度不匹配: 期望 {EXPECTED_SIZE}, 实际 {len(y_all)}")
-        #     corrected_y = np.zeros(EXPECTED_SIZE, dtype=y_all.dtype)
-        #     copy_length = min(len(y_all), EXPECTED_SIZE)
-        #     corrected_y[:copy_length] = y_all[:copy_length]
-        #     y_all = corrected_y
-
+        output_file = os.path.join(record_dir, "MS2CANet_HC100 Trento20个做训练集+类别原型（pytorch_1）.txt")
 
         # 清理GPU缓存
         if torch.cuda.is_available():
