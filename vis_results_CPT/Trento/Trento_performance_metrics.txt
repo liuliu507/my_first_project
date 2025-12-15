@@ -1,0 +1,9 @@
+Trento HSI-LiDAR Fusion Classification Performance Metrics
+============================================================
+
+Iteration 1:
+  Overall Accuracy: 99.4980
+  Average Accuracy: 99.0121
+  Kappa Coefficient: 99.3297
+  Per-class Accuracy: ['99.7260', '98.4044', '98.2571', '100.0000', '99.8187', '97.8662']
+

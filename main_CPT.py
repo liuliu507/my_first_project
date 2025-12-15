@@ -10,10 +10,10 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as dataf
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+import torch.nn.functional as F
 
-# from pymodel import pyCNN
-from CPTFusionBlock_gated import pyCNN
-from data_prepare_20nums import loadData, applyPCA, padWithZeros, createImageCubes, TrainDS, TestDS,acc_reports
+from pymodel_CPT import pyCNN
+from data_prepare import loadData, applyPCA, padWithZeros, createImageCubes, TrainDS, TestDS,acc_reports
 import record
 
 # 设置参数
@@ -26,11 +26,11 @@ np.random.seed(seed)
 os.environ['PYTHONHASHSEED'] = str(seed)
 
 BATCH_SIZE_TRAIN = 64
-EPOCH = 200
+EPOCH = 300
 LR = 0.001
 # CLASSES_NUM = 15  # Houston数据集
-# CLASSES_NUM = 11  # Muufl数据集
-CLASSES_NUM = 6  # Trento数据集
+CLASSES_NUM = 11  # Muufl数据集
+# CLASSES_NUM = 6  # Trento数据集
 
 
 def create_data_loader():
@@ -129,52 +129,69 @@ def create_data_loader():
 
 
 def train(train_loader, epochs):
-    """训练模型"""
+    """训练模型（CPT + 自蒸馏）"""
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # 初始化模型
-    para_tune = True
-    FM = 64
 
-    cnn = pyCNN(FM=FM, NC=30, Classes=CLASSES_NUM, para_tune=para_tune)
+    FM = 64
+    cnn = pyCNN(FM=FM, NC=30, Classes=CLASSES_NUM)
     cnn.to(device)
 
-    # 计算类别权重，处理类别不平衡问题
+    # 类别权重
     all_labels = []
-
     for _, _, labels in train_loader:
         all_labels.extend(labels.cpu().numpy())
     class_counts = np.bincount(all_labels, minlength=CLASSES_NUM)
     class_weights = 1. / (class_counts + 1e-6)
     class_weights = torch.FloatTensor(class_weights).to(device)
+
+    # 分类损失
     criterion = nn.CrossEntropyLoss(weight=class_weights)
+    # KL 散度损失（自蒸馏用）
+    kl_loss_fn = nn.KLDivLoss(reduction="batchmean")
 
     optimizer = optim.Adam(cnn.parameters(), lr=LR, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCH)
 
-    total_loss = 0
-    BestAcc = 0
-
     for epoch in range(epochs):
         cnn.train()
+        running_loss = 0.0
         for i, (hsi, lidar, target) in enumerate(train_loader):
             hsi, lidar = hsi.to(device), lidar.to(device)
             target = target.to(device)
 
-            out1, out2, out3, proto_loss = cnn(hsi, lidar, target)
+            # forward: pyCNN 返回 out1,out2,out3, mask_pred
+            out1, out2, out3 = cnn(hsi, lidar)
+
+            # 分类损失
             loss1 = criterion(out1, target)
             loss2 = criterion(out2, target)
             loss3 = criterion(out3, target)
-            loss = loss1 + loss2 + loss3 + proto_loss
+            cls_loss = loss1 + loss2 + loss3
+
+            # ---------- 自蒸馏 KL Loss ----------
+            with torch.no_grad():
+                teacher_prob = F.softmax(out3, dim=1)  # teacher 概率分布
+            student_logprob1 = F.log_softmax(out1, dim=1)
+            student_logprob2 = F.log_softmax(out2, dim=1)
+
+            kd_loss1 = kl_loss_fn(student_logprob1, teacher_prob)
+            kd_loss2 = kl_loss_fn(student_logprob2, teacher_prob)
+
+            KD_LAMBDA = 0.3  # 蒸馏权重，可以调 {0.1, 0.3, 0.5}
+            loss = cls_loss + KD_LAMBDA * (kd_loss1 + kd_loss2)
+            # -----------------------------------
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
-            total_loss += loss.item()
+            running_loss += loss.item()
 
-        print('[Epoch: %d] [loss avg: %.4f] [current loss: %.4f] [proto loss: %.4f]' %
-              (epoch + 1, total_loss / (epoch + 1), loss.item(), proto_loss.item()))
+        avg_loss = running_loss / (i + 1)
+        print('[Epoch: %d] [loss avg: %.4f] ' % (epoch + 1, avg_loss))
         scheduler.step()
+
     print('Finished Training')
     return cnn, device
 
@@ -188,8 +205,8 @@ def test(device, net, test_loader):
     for hsi, lidar, labels in test_loader:
         hsi = hsi.to(device)
         lidar = lidar.to(device)
-        outputs = net(hsi, lidar,None)
-        outputs = 1 * outputs[2] + 0.01 * outputs[1] + 0.01 * outputs[0]
+        outputs = net(hsi, lidar)
+        outputs = 1 * outputs[2] + 0.2 * outputs[1] + 0.2 * outputs[0]
         preds = torch.max(outputs, 1)[1].cpu().numpy()
 
         y_pred_test.extend(preds)
@@ -214,9 +231,6 @@ if __name__ == '__main__':
     for index_iter in range(ITER):
 
         print("iter:", index_iter)
-        # save_dir = "C:\\Users\\liuliu\\Desktop\\应用中心\\论文\\论文（已看）\\CSCA\\CSCANet-main\\CSCANet_main\\dataset"
-        # save_path = os.path.join(save_dir, 'classification_report_HC_' + str(index_iter) + '.pth')
-
         # 训练模型
         tic1 = time.perf_counter()
         net, device = train(train_loader, epochs=EPOCH)
@@ -247,7 +261,8 @@ if __name__ == '__main__':
         ELEMENT_ACC[index_iter, :] = each_acc_full
 
         record_dir = r"C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\MS2CA\MS2CANet-main\record"
-        output_file = os.path.join(record_dir, "MS2CANet_HC100 Trento20个做训练集+类别原型（pytorch_1）.txt")
+        output_file = os.path.join(record_dir, "MS2CANet_HC106 Muufl_CPT_revise.txt")
+
 
         # 清理GPU缓存
         if torch.cuda.is_available():

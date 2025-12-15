@@ -17,25 +17,25 @@ import record
 
 def loadData():
 
-    # data = sio.loadmat(
-    #     r'./Data/Muufl_hsi.mat')[
-    #     'hsi']
-    # labels = sio.loadmat(
-    #     r'.\Data\Muufl_gt.mat')[
-    #     'Muufl_gt']
-    # lidar_data = sio.loadmat(
-    #     r'.\Data\Muufl_Lidar.mat')[
-    #     'lidar']
-
     data = sio.loadmat(
-        r'./Data/Houston.mat')[
-        'img']
+        r'./Data/Muufl_hsi.mat')[
+        'hsi']
     labels = sio.loadmat(
-        r'./Data/Houston_gt.mat')[
-        'Houston_gt']
+        r'.\Data\Muufl_gt.mat')[
+        'Muufl_gt']
     lidar_data = sio.loadmat(
-        r'./Data/Houston_LiDAR.mat')[
-        'img']
+        r'.\Data\Muufl_Lidar.mat')[
+        'lidar']
+
+    # data = sio.loadmat(
+    #     r'./Data/Houston.mat')[
+    #     'img']
+    # labels = sio.loadmat(
+    #     r'./Data/Houston_gt.mat')[
+    #     'Houston_gt']
+    # lidar_data = sio.loadmat(
+    #     r'./Data/Houston_LiDAR.mat')[
+    #     'img']
 
     # data = sio.loadmat(
     #     r'./Data/Trento_hsi.mat')[
@@ -160,19 +160,19 @@ def AA_andEachClassAccuracy(confusion_matrix):
 
 def acc_reports(y_test, y_pred_test):
     # Houston2013
-    all_names = ['Healthy Grass', 'Stressed Grass', 'Synthetic Grass', 'Tree',
-                 'Soil', 'Water', 'Residential', 'Commercial', 'Road', 'Highway',
-                 'Railway', 'Parking Lot1', 'Parking Lot2', 'Tennis Court',
-                 'Running Track']
+    # all_names = ['Healthy Grass', 'Stressed Grass', 'Synthetic Grass', 'Tree',
+    #              'Soil', 'Water', 'Residential', 'Commercial', 'Road', 'Highway',
+    #              'Railway', 'Parking Lot1', 'Parking Lot2', 'Tennis Court',
+    #              'Running Track']
 
     # Trento
     # all_names = ['Apple Trees', 'Buildings', 'Ground',
     #              'Woods', 'Vineyard', 'Roads', ]  # Trento 6
 
     # Muufl
-    # all_names = ['Trees', 'Mostly grass', 'Mixed ground surface',
-    #              'Dirt and sand', 'Road','Water', 'Building Shadow',
-    #              'Building','Sidewalk', 'Yellow curb','Cloth panels']  # Muufl 11
+    all_names = ['Trees', 'Mostly grass', 'Mixed ground surface',
+                 'Dirt and sand', 'Road','Water', 'Building Shadow',
+                 'Building','Sidewalk', 'Yellow curb','Cloth panels']  # Muufl 11
 
     # Augsburg
     # all_names = ['Forest', 'Residential Area', 'Industrial Area',

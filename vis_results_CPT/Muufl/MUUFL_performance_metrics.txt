@@ -1,0 +1,9 @@
+MUUFL HSI-LiDAR Fusion Classification Performance Metrics
+============================================================
+
+Iteration 1:
+  Overall Accuracy: 83.3945
+  Average Accuracy: 83.1134
+  Kappa Coefficient: 78.5397
+  Per-class Accuracy: ['88.1857', '84.0941', '66.1615', '91.0853', '75.4612', '96.6368', '83.1451', '95.9486', '51.2821', '84.0491', '98.1982']
+

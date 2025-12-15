@@ -1,0 +1,9 @@
+HSI-LiDAR Fusion Classification Performance Metrics
+==================================================
+
+Iteration 1:
+  Overall Accuracy: 94.4497
+  Average Accuracy: 95.3522
+  Kappa Coefficient: 93.9973
+  Per-class Accuracy: ['97.8067', '99.0276', '99.1137', '99.9183', '100.0000', '99.0164', '98.2372', '87.1732', '83.7662', '94.9461', '99.3416', '74.6084', '97.3274', '100.0000', '100.0000']
+
