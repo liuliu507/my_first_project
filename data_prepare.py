@@ -1,200 +1,126 @@
-import random
 import numpy as np
-import os
-import matplotlib.pyplot as plt
 import scipy.io as sio
-from numpy import resize
-from sklearn.decomposition import PCA
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import confusion_matrix, accuracy_score, classification_report, cohen_kappa_score
-import torch
-import torch.nn as nn
-import torch.optim as optim
-from operator import truediv
-import time
-import record
 
 
-def loadData():
+def samplingFixedNum(sample_num, groundTruth, seed):
+    """
+    实验室提供的采样方法
+    """
+    labels_loc = {}
+    train_ = {}
+    test_ = {}
 
-    data = sio.loadmat(
-        r'./Data/Muufl_hsi.mat')[
-        'hsi']
-    labels = sio.loadmat(
-        r'.\Data\Muufl_gt.mat')[
-        'Muufl_gt']
-    lidar_data = sio.loadmat(
-        r'.\Data\Muufl_Lidar.mat')[
-        'lidar']
+    np.random.seed(seed)
+    m = max(groundTruth)
 
-    # data = sio.loadmat(
-    #     r'./Data/Houston.mat')[
-    #     'img']
-    # labels = sio.loadmat(
-    #     r'./Data/Houston_gt.mat')[
-    #     'Houston_gt']
-    # lidar_data = sio.loadmat(
-    #     r'./Data/Houston_LiDAR.mat')[
-    #     'img']
+    for i in range(m):
+        indices = [j for j, x in enumerate(groundTruth.ravel().tolist()) if x == i + 1]
+        np.random.shuffle(indices)
+        labels_loc[i] = indices
+        train_[i] = indices[:sample_num]
+        test_[i] = indices[sample_num:]
 
-    # data = sio.loadmat(
-    #     r'./Data/Trento_hsi.mat')[
-    #     'HSI']
-    # labels = sio.loadmat(
-    #     r'./Data/Trento_allgrd.mat')[
-    #     'mask_test']
-    # lidar_data = sio.loadmat(
-    #     r'./Data/Trento_LiDAR.mat')[
-    #     'LiDAR']
+    train_fix_indices = []
+    test_fix_indices = []
 
-    # data = sio.loadmat(
-    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_hsi.mat')[
-    #     'augsburg_hsi']
-    # labels = sio.loadmat(
-    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_gt.mat')[
-    #     'augsburg_gt']
-    # lidar_data = sio.loadmat(
-    #     r'C:\Users\liuliu\Desktop\应用中心\论文\论文（已看）\CSCA\CSCANet_main\Data\augsburg_sar.mat')[
-    #     'augsburg_sar']
+    for i in range(m):
+        train_fix_indices += train_[i]
+        test_fix_indices += test_[i]
 
-    # 检查LiDAR数据的维度
-    if len(lidar_data.shape) == 3 and lidar_data.shape[2] >= 2:
-        print(f"原始LiDAR数据形状: {lidar_data.shape} - 将对两个通道取平均值")
-        # 对两个通道取平均值，降维为单通道
-        lidar_data = np.mean(lidar_data, axis=2)
-    elif len(lidar_data.shape) == 2:
-        print(f"原始LiDAR数据形状: {lidar_data.shape} - 已经是单通道")
+    np.random.shuffle(train_fix_indices)
+    np.random.shuffle(test_fix_indices)
+
+    return train_fix_indices, test_fix_indices
+
+
+def data_load_and_save(name="Muufl", train_num=20):
+    """
+    加载数据并保存采样结果
+    参数说明:
+    参数说明:
+        name: 数据集名称
+        train_num: 每类训练样本数
+    """
+
+    # 根据数据集名称加载标签数据
+    if name == "Trento":
+        # 加载标签数据
+        AllLabel = sio.loadmat(r'./Data/Trento_allgrd.mat')['mask_test']
+
+    elif name == "Muufl":
+        AllLabel = sio.loadmat(r'./Data/Muufl_gt.mat')['Muufl_gt']
+
+    elif name == "Houston":
+        AllLabel = sio.loadmat(r'./Data/Houston_gt.mat')['Houston_gt']
+
+    elif name == "Augsburg":
+        AllLabel = sio.loadmat(r'./Data/augsburg_gt.mat')['augsburg_gt']
     else:
-        raise ValueError(f"意外的LiDAR数据形状: {lidar_data.shape}")
+        raise ValueError(f"不支持的数据库: {name}")
 
-    # 打印处理后的形状
-    print(f"处理后LiDAR数据形状: {lidar_data.shape}")
+    print(f"数据集: {name}")
+    print(f"标签数据形状: {AllLabel.shape}")
+    print(f"每类训练样本数: {train_num}")
 
-    return data, labels, lidar_data
+    # 进行10次实验
+    for i in range(10):
+        seed = i + 1  # 随机种子1-10，与第二个代码完全一致
 
+        # 展平标签数据
+        gt = AllLabel.reshape(np.prod(AllLabel.shape[:2]), ).astype(np.int64)
 
-# 对高光谱数据 X 应用 PCA 变换
-def applyPCA(X, numComponents):
-    newX = np.reshape(X, (-1, X.shape[2]))
-    pca = PCA(n_components=numComponents, whiten=True)
-    newX = pca.fit_transform(newX)
-    newX = np.reshape(newX, (X.shape[0], X.shape[1], numComponents))
-    return newX
+        # 使用与第二个代码完全相同的采样函数
+        train_index, test_index = samplingFixedNum(train_num, gt, seed)
 
+        # 创建训练和测试数据数组 - 与第二个代码逻辑完全一致
+        train_data = np.zeros(np.prod(AllLabel.shape[:2]), )
+        train_data[train_index] = gt[train_index]
+        test_data = np.zeros(np.prod(AllLabel.shape[:2]), )
+        test_data[test_index] = gt[test_index]
 
-# 对单个像素周围提取 patch 时，边缘像素就无法取了，因此，给这部分像素进行 padding 操作
-def padWithZeros(X, margin=2):
-    newX = np.zeros((X.shape[0] + 2 * margin, X.shape[1] + 2 * margin, X.shape[2]))
-    x_offset = margin
-    y_offset = margin
-    newX[x_offset:X.shape[0] + x_offset, y_offset:X.shape[1] + y_offset, :] = X
-    return newX
+        # 重新塑形为原始数据的形状 - 与第二个代码逻辑完全一致
+        # 注意：这里使用np.prod确保维度正确
+        original_shape = AllLabel.shape
+        train_data = train_data.reshape(original_shape[0], original_shape[1])
+        test_data = test_data.reshape(original_shape[0], original_shape[1])
 
+        # 保存训练和测试数据到MAT文件 - 格式与第二个代码完全一致
+        save_path = f'./Results/{name}/train_test_gt_{i + 1}.mat'
 
-# 在每个像素周围提取 patch ，然后创建成符合 keras 处理的格式
-def createImageCubes(hsi_data, lidar_data, y, windowSize=5, removeZeroLabels=True):
-    # 给 X 做 padding
-    margin = int((windowSize - 1) / 2)
-    hsi_padded = padWithZeros(hsi_data, margin=margin)
-    lidar_padded = padWithZeros(np.expand_dims(lidar_data, axis=-1), margin=margin)
-    # split patches
-    patchesData_hsi = np.zeros((hsi_data.shape[0] * hsi_data.shape[1], windowSize, windowSize, hsi_data.shape[2]))
-    patchesData_lidar = np.zeros((lidar_data.shape[0] * lidar_data.shape[1], windowSize, windowSize, 1))
-    patchesLabels = np.zeros((hsi_data.shape[0] * hsi_data.shape[1]))
+        # 确保保存目录存在
+        import os
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
 
-    patchIndex = 0
-    for r in range(margin, hsi_padded.shape[0] - margin):
-        for c in range(margin, hsi_padded.shape[1] - margin):
-            patchesData_hsi[patchIndex] = hsi_padded[r - margin:r + margin + 1, c - margin:c + margin + 1, :]
-            patchesData_lidar[patchIndex] = lidar_padded[r - margin:r + margin + 1, c - margin:c + margin + 1, :]
-            patchesLabels[patchIndex] = y[r - margin, c - margin]
-            patchIndex += 1
-    if removeZeroLabels:
-        mask = patchesLabels > 0
-        return patchesData_hsi[mask], patchesData_lidar[mask], patchesLabels[mask] - 1
+        sio.savemat(save_path, {
+            'train_data': train_data,
+            'test_data': test_data,
+            'train_index': train_index,
+            'test_index': test_index
+        })
 
-    return patchesData_hsi, patchesData_lidar, patchesLabels
+        print(f"  实验 {i + 1}: 已保存到 {save_path}")
+        print(f"    训练样本数: {len(train_index)}")
+        print(f"    测试样本数: {len(test_index)}")
 
-# 封装为可迭代的Dataset对象
-""" Training dataset"""
-class TrainDS(torch.utils.data.Dataset):
-    def __init__(self, Xtrain_hsi, Xtrain_lidar, ytrain):
-        self.len = ytrain.shape[0]
-        self.x_hsi = torch.FloatTensor(Xtrain_hsi).squeeze(1)  # HSI保持[N,30,13,13]
-        self.x_lidar = torch.FloatTensor(Xtrain_lidar)  # 不要squeeze，保持[N,1,13,13]
-        self.y = torch.LongTensor(ytrain)
+        # 输出每类样本分布
+        train_labels = train_data.ravel()
+        test_labels = test_data.ravel()
 
-    def __getitem__(self, index):
-        return self.x_hsi[index], self.x_lidar[index], self.y[index]
-
-    def __len__(self):
-        return self.len
+        unique_classes = np.unique(gt[gt > 0])
+        print(f"    类别分布:")
+        for cls in unique_classes:
+            train_cls_count = np.sum(train_labels == cls)
+            test_cls_count = np.sum(test_labels == cls)
+            print(f"      类别 {int(cls)}: 训练={train_cls_count}, 测试={test_cls_count}")
 
 
-""" Testing dataset"""
-class TestDS(torch.utils.data.Dataset):
+# 使用示例
+if __name__ == "__main__":
+    # 您可以在这里指定要处理的数据集
+    datasets = ["Houston", "Muufl", "Trento", "Augsburg"]
 
-    def __init__(self, Xtest_hsi, Xtest_lidar, ytest):
-        self.len = ytest.shape[0]
-        self.x_hsi = torch.FloatTensor(Xtest_hsi)
-        self.x_lidar = torch.FloatTensor(Xtest_lidar)
-        self.y_data = torch.LongTensor(ytest)
-
-    def __getitem__(self, index):
-        # 根据索引返回数据和对应的标签
-        return self.x_hsi[index], self.x_lidar[index], self.y_data[index]
-
-    def __len__(self):
-        # 返回文件数据的数目
-        return self.len
-
-
-
-def AA_andEachClassAccuracy(confusion_matrix):
-    list_diag = np.diag(confusion_matrix)
-    list_raw_sum = np.sum(confusion_matrix, axis=1)
-    each_acc = np.nan_to_num(truediv(list_diag, list_raw_sum))
-    average_acc = np.mean(each_acc)
-    return each_acc, average_acc
-
-
-def acc_reports(y_test, y_pred_test):
-    # Houston2013
-    # all_names = ['Healthy Grass', 'Stressed Grass', 'Synthetic Grass', 'Tree',
-    #              'Soil', 'Water', 'Residential', 'Commercial', 'Road', 'Highway',
-    #              'Railway', 'Parking Lot1', 'Parking Lot2', 'Tennis Court',
-    #              'Running Track']
-
-    # Trento
-    # all_names = ['Apple Trees', 'Buildings', 'Ground',
-    #              'Woods', 'Vineyard', 'Roads', ]  # Trento 6
-
-    # Muufl
-    all_names = ['Trees', 'Mostly grass', 'Mixed ground surface',
-                 'Dirt and sand', 'Road','Water', 'Building Shadow',
-                 'Building','Sidewalk', 'Yellow curb','Cloth panels']  # Muufl 11
-
-    # Augsburg
-    # all_names = ['Forest', 'Residential Area', 'Industrial Area',
-    #     'Low Plants', 'Soil', 'Allotment',
-    #     'Commercial Area', 'Water', 'Railway',
-    #     'Harbor', 'Pasture', 'Roads','Urban Green'] # Augsburg 13
-
-    unique_labels = sorted(np.unique(y_test))
-    used_names = [all_names[i] for i in unique_labels]
-
-    classification = classification_report(
-        y_test,
-        y_pred_test,
-        labels=unique_labels,
-        digits=4,
-        target_names=used_names
-    )
-
-    confusion = confusion_matrix(y_test, y_pred_test, labels=unique_labels)
-    each_acc, aa = AA_andEachClassAccuracy(confusion)
-    oa = accuracy_score(y_test, y_pred_test)
-    kappa = cohen_kappa_score(y_test, y_pred_test)
-
-    return classification, oa * 100, confusion, each_acc * 100, aa * 100, kappa * 100, unique_labels
-
+    for dataset_name in datasets:
+        try:
+            data_load_and_save(name=dataset_name, train_num=20)
+        except Exception as e:
+            print(f"处理数据集 {dataset_name} 时出错: {e}")

@@ -21,16 +21,16 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM*2),
             nn.LeakyReLU(),
             nn.MaxPool2d(2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
 
         self.conv3 = nn.Sequential(
-            nn.Conv2d(FM * 2, FM * 4, kernel_size=3, stride=1, padding=1),  # 普通卷积
+            nn.Conv2d(FM * 2, FM * 4, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(FM * 4),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
         self.conv4 = nn.Sequential(
@@ -46,15 +46,15 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM*2),
             nn.LeakyReLU(),
             nn.MaxPool2d(2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
         self.conv6 = nn.Sequential(
-            nn.Conv2d(FM * 2, FM * 4, kernel_size=3, stride=1, padding=1),  # 普通卷积
+            nn.Conv2d(FM * 2, FM * 4, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(FM * 4),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
 
@@ -79,7 +79,7 @@ class pyCNN(nn.Module):
         x1 = self.conv3(x1)
         x2 = self.conv6(x2)
 
-        x1 = x1.view(x1.size(0), -1)  # flatten the output of conv2 to (batch_size, 32 * 7 * 7)
+        x1 = x1.view(x1.size(0), -1)
         out1 = self.out1(x1)
 
         x2 = x2.view(x2.size(0), -1)

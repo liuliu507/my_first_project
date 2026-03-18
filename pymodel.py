@@ -2,9 +2,8 @@ import torch
 import torch.nn as nn
 from torchsummary import summary
 import torch.nn.functional as F
-
-# 从 cftv2_head.py 中导入以下类：
-from cftv2_head import SelectiveEnhancedCFTBlock
+import math
+from cftv2_head import CFTBlock
 
 
 class pyCNN(nn.Module):
@@ -23,7 +22,7 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM*2),
             nn.LeakyReLU(),
             nn.MaxPool2d(2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
 
@@ -32,7 +31,7 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM * 4),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
         self.conv4 = nn.Sequential(
@@ -48,7 +47,7 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM*2),
             nn.LeakyReLU(),
             nn.MaxPool2d(2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
         self.conv6 = nn.Sequential(
@@ -56,31 +55,31 @@ class pyCNN(nn.Module):
             nn.BatchNorm2d(FM * 4),
             nn.LeakyReLU(),
             nn.MaxPool2d(kernel_size=2),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
         )
 
 
-        cpt_embed = FM * 4  # 或 256
+        cpt_embed = FM * 4
         self.proj_x1 = nn.Conv2d(FM * 4, cpt_embed, 1)
         self.proj_x2 = nn.Conv2d(FM * 4, cpt_embed, 1)
         self.ln_x1 = nn.LayerNorm(cpt_embed)
-        self.cpt_block = SelectiveEnhancedCFTBlock(embed_dims=cpt_embed,
+        self.cpt_block = CFTBlock(embed_dims=cpt_embed,
                                   num_heads=4,
                                   num_classes=Classes,
-                                  attn_drop_rate=0.0,
+                                  attn_drop_rate=0.05,
                                   drop_rate=0.1,
                                   qkv_bias=True,
-                                  mlp_ratio=4,
-                                  use_memory=False,
+                                  mlp_ratio=2,
+                                  use_memory=True,
                                   init_memory=None,
-                                  norm_cfg=dict(type='LN', eps=1e-6),
-                                  )
-        self.fuse_beta = 0.5  # residual 权重，后续可改为 learnable nn.Parameter
-
+                                  norm_cfg=dict(type='LN', eps=1e-6))
+        self.fuse_beta = 0.5
+        # self.fuse_beta = nn.Parameter(torch.tensor(0.3))
 
         self.out1 = nn.Linear(FM * 4, Classes)
         self.out2 = nn.Linear(FM * 4, Classes)
         self.out3 = nn.Linear(FM * 4, Classes)
+
 
     def forward(self, x1, x2):
 
@@ -113,10 +112,23 @@ class pyCNN(nn.Module):
         cpt_feat = outs['out']  # [B, embed, H, W] (matches x1p_norm spatial)
 
         # residual 融合 回到分类头
-        fused = x1 + cpt_feat * self.fuse_beta  # 若通道不一致，可先投回 FM*4
+        # fused = x1 + cpt_feat * self.fuse_beta  # 若通道不一致，可先投回 FM*4
+
+        # 改为可学习的加权融合
+        if hasattr(self, 'fuse_beta') and isinstance(self.fuse_beta, nn.Parameter):
+            beta = torch.sigmoid(self.fuse_beta)  # 确保在0-1之间
+        else:
+            beta = self.fuse_beta
+
+        # 添加一个简单的注意力门控
+        gate = torch.sigmoid(torch.mean(x1, dim=1, keepdim=True))
+        cpt_feat_weighted = cpt_feat * gate
+
+        fused = x1 + cpt_feat_weighted * beta
+        # ================================
+
         fused_flat = fused.view(fused.size(0), -1)
         out3 = self.out3(fused_flat)
-
 
         x1 = x1.view(x1.size(0), -1)  # flatten the output of conv2 to (batch_size, 32 * 7 * 7)
         out1 = self.out1(x1)
@@ -124,17 +136,4 @@ class pyCNN(nn.Module):
         x2 = x2.view(x2.size(0), -1)
         out2 = self.out2(x2)
 
-        # # 调用 CPT 融合 HSI 和 LiDAR 特征
-        # cpt_out = self.cpt_block(x1.unsqueeze(-1).unsqueeze(-1),  # low
-        #                          x2.unsqueeze(-1).unsqueeze(-1))  # high
-        # x = cpt_out['out'].view(x1.size(0), -1)  # 拉平成向量
-        # out3 = self.out3(x)
-
-        # x = x1 + x2
-        # # x = x.view(x.size(0), 1, 2, -1)
-        # out3 = self.out3(x)
-
-        # x = torch.cat([x1, x2], dim=1)
-        # x = x.view(x.size(0), 1, 2, -1)
-        # out3 = self.out3(x)
         return out1, out2, out3
